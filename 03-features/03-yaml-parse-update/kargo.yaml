@@ -1,0 +1,86 @@
+apiVersion: kargo.akuity.io/v1alpha1
+kind: Project
+metadata:
+  name: kargo-demo-17
+
+---
+apiVersion: v1
+kind: Secret
+type: Opaque
+metadata:
+  name: git-creds
+  namespace: kargo-demo-17
+  labels:
+    kargo.akuity.io/cred-type: git
+stringData:
+  repoURL: https://github.com/<github-username>/kargo-examples.git
+  username: <github-username>
+  password: <github-pat>
+
+---
+apiVersion: kargo.akuity.io/v1alpha1
+kind: Warehouse
+metadata:
+  name: git-source-file
+  namespace: kargo-demo-17
+spec:
+  subscriptions:
+  - git:
+      repoURL: https://github.com/<github-username>/kargo-examples.git
+      branch: main
+      includePaths:
+      - 03-features/03-yaml-parse-update/testdata/source.yaml
+
+---
+apiVersion: kargo.akuity.io/v1alpha1
+kind: Stage
+metadata:
+  name: yaml-parse-update
+  namespace: kargo-demo-17
+spec:
+  requestedFreight:
+  - origin:
+      kind: Warehouse
+      name: git-source-file
+    sources:
+      direct: true
+  promotionTemplate:
+    spec:
+      vars:
+      - name: repoURL
+        value: https://github.com/<github-username>/kargo-examples.git
+      steps:
+      # Clone the repo twice: once for the source file from the Warehouse commit
+      # and once for the destination file to be updated in main.
+      - uses: git-clone
+        config:
+          repoURL: ${{ vars.repoURL }}
+          checkout:
+          - commit: ${{ commitFrom( vars.repoURL, warehouse("git-source-file")).ID }}
+            path: ./src
+          - branch: main
+            path: ./dst
+      # Parse the source file to get the desired version from Warehouse commit
+      - uses: yaml-parse
+        as: values
+        config:
+          path: ./src/03-features/03-yaml-parse-update/testdata/source.yaml
+          outputs:
+          - name: version
+            fromExpression: version
+      # Update the destination file with the version from the source file
+      - uses: yaml-update
+        config:
+          path: ./dst/03-features/03-yaml-parse-update/testdata/destination.yaml
+          updates:
+          - key: image.tag
+            value: ${{ outputs.values.version }}
+      # Commit and push the updated destination file to the main branch
+      - uses: git-commit
+        as: commit
+        config:
+          path: ./dst
+          message: Update image tag to ${{ outputs.values.version }}
+      - uses: git-push
+        config:
+          path: ./dst
