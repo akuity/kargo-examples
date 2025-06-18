@@ -1,0 +1,109 @@
+apiVersion: kargo.akuity.io/v1alpha1
+kind: Project
+metadata:
+  name: kargo-demo-18
+
+---
+apiVersion: kargo.akuity.io/v1alpha1
+kind: Warehouse
+metadata:
+  name: vars
+  namespace: kargo-demo-18
+spec:
+  subscriptions:
+  - chart:
+      repoURL: https://charts.bitnami.com/bitnami
+      name: nginx
+
+---
+apiVersion: kargo.akuity.io/v1alpha1
+kind: Stage
+metadata:
+  name: vars
+  namespace: kargo-demo-18
+spec:
+  vars:
+  - name: pokemon_1
+    value: pikachu
+  requestedFreight:
+  - origin:
+      kind: Warehouse
+      name: vars
+    sources:
+      direct: true
+  promotionTemplate:
+    spec:
+      vars:
+      - name: pokemon_2
+        value: charmander
+      steps:
+      - task:
+          name: promo-process
+        vars:
+        - name: pokemon_3
+          value: bulbasaur
+  verification:
+    analysisTemplates:
+    - name: pokemon-query
+    args:
+    - name: pokemon
+      value: ${{ vars.pokemon_1 }}
+
+---
+apiVersion: kargo.akuity.io/v1alpha1
+kind: PromotionTask
+metadata:
+  name: promo-process
+  namespace: kargo-demo-18
+spec:
+  vars:
+  - name: pokemon_3
+  - name: pokemon_4
+    value: ditto
+  steps:
+  - uses: http
+    config:
+      # Defined in Stage spec.vars
+      url: https://pokeapi.co/api/v2/pokemon/${{ vars.pokemon_1 }}
+      outputs:
+      - name: response
+        fromExpression: response.body.name
+  - uses: http
+    config:
+      # Defined in Stage spec.promotionTemplate.spec.vars
+      url: https://pokeapi.co/api/v2/pokemon/${{ vars.pokemon_2 }}
+      outputs:
+      - name: response
+        fromExpression: response.body.name
+  - uses: http
+    config:
+      # Defined in Stage spec.promotionTemplate.spec.steps[].vars
+      url: https://pokeapi.co/api/v2/pokemon/${{ vars.pokemon_3 }}
+      outputs:
+      - name: response
+        fromExpression: response.body.name
+  - uses: http
+    config:
+      # Defined in PromotionTask spec.vars
+      url: https://pokeapi.co/api/v2/pokemon/${{ vars.pokemon_4 }}
+      outputs:
+      - name: response
+        fromExpression: response.body.name
+
+---
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata:
+  name: pokemon-query
+  namespace: kargo-demo-18
+spec:
+  args:
+    - name: pokemon
+  metrics:
+    - name: pokemon-xp
+      provider:
+        web:
+          # Defined in Stage spec.vars
+          url: https://pokeapi.co/api/v2/pokemon/{{args.pokemon}}
+          jsonPath: "{$.base_experience}"
+      successCondition: result < 200
